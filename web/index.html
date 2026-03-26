@@ -130,7 +130,7 @@
     };
     const nextTick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-    const OTP_API_BASE = window.OTP_API_BASE || "http://localhost:4000";
+    const OTP_API_BASE = window.OTP_API_BASE || "https://quiz-backend-volq.onrender.com";
 
     async function callOtpApi(path, payload) {
       const response = await fetch(`${OTP_API_BASE}${path}`, {

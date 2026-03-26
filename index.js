@@ -1,8 +1,8 @@
 import express from "express";
 import dotenv from "dotenv";
-import { Resend } from "resend";
 import admin from "firebase-admin";
 import crypto from "crypto";
+import nodemailer from "nodemailer";
 
 dotenv.config();
 
@@ -11,19 +11,25 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 4000;
 
-// 🔑 ENV VARIABLES
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL;
-const RESEND_FROM_NAME = process.env.RESEND_FROM_NAME || "Quiz Game";
+// ?? SMTP env
+const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
+const SMTP_PORT = Number(process.env.SMTP_PORT) || 587;
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
+const SMTP_FROM_EMAIL = process.env.SMTP_FROM_EMAIL || SMTP_USER;
+const SMTP_FROM_NAME = process.env.SMTP_FROM_NAME || "Quiz Game";
+const SMTP_SECURE =
+  process.env.SMTP_SECURE === "true" || SMTP_PORT === 465;
 
-console.log("🔑 API KEY:", RESEND_API_KEY ? "Loaded ✅" : "Missing ❌");
-console.log("📧 FROM EMAIL:", RESEND_FROM_EMAIL);
+// ?? Debug logs
+console.log("?? SMTP USER:", SMTP_USER ? "Loaded ?" : "Missing ?");
+console.log("?? FROM EMAIL:", SMTP_FROM_EMAIL);
 
-// 🔥 Firebase init
+// ?? Firebase init
 const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
 
 if (!serviceAccountJson) {
-  console.error("❌ FIREBASE_SERVICE_ACCOUNT_JSON missing");
+  console.error("? FIREBASE_SERVICE_ACCOUNT_JSON missing");
   process.exit(1);
 }
 
@@ -31,7 +37,7 @@ let serviceAccount;
 try {
   serviceAccount = JSON.parse(serviceAccountJson);
 } catch (err) {
-  console.error("❌ Invalid Firebase JSON");
+  console.error("? Invalid Firebase JSON");
   process.exit(1);
 }
 
@@ -43,15 +49,46 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
-// 🔴 Resend check
-if (!RESEND_API_KEY || !RESEND_FROM_EMAIL) {
-  console.error("❌ Resend not configured properly");
+// ?? SMTP transporter
+if (!SMTP_USER || !SMTP_PASS) {
+  console.error("? SMTP_USER or SMTP_PASS missing");
   process.exit(1);
 }
 
-const resend = new Resend(RESEND_API_KEY);
+const transporter = nodemailer.createTransport({
+  host: SMTP_HOST,
+  port: SMTP_PORT,
+  secure: SMTP_SECURE,
+  auth: {
+    user: SMTP_USER,
+    pass: SMTP_PASS
+  }
+});
 
-// 🌍 CORS
+// ?? Verify SMTP connection
+transporter.verify((error, success) => {
+  if (error) {
+    console.error("? SMTP connection failed:", error);
+  } else {
+    console.log("? SMTP ready");
+  }
+});
+
+async function sendMail({ to, subject, html }) {
+  const from = `${SMTP_FROM_NAME} <${SMTP_FROM_EMAIL}>`;
+
+  const info = await transporter.sendMail({
+    from,
+    to,
+    subject,
+    html
+  });
+
+  console.log("?? Email sent:", info.messageId);
+  return info;
+}
+
+// ?? CORS
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -60,30 +97,30 @@ app.use((req, res, next) => {
   next();
 });
 
-// 🟢 Root
-app.get("/", (req, res) => {
-  res.send("Server is running ✅");
+// ?? Root
+app.get("/", (_req, res) => {
+  res.send("Server is running ?");
 });
 
-// 🧪 TEST EMAIL ROUTE (IMPORTANT)
-app.get("/test-email", async (req, res) => {
+// ?? Test email
+app.get("/test-email", async (_req, res) => {
   try {
-    const response = await resend.emails.send({
-      from: `${RESEND_FROM_NAME} <${RESEND_FROM_EMAIL}>`,
-      to: ["afridchand@gmail.com"], // 👈 yaha apna email daal
-      subject: "Test Email ✅",
-      html: "<h1>Resend working 🚀</h1>"
+    const testTo = process.env.TEST_EMAIL || SMTP_USER;
+
+    await sendMail({
+      to: testTo,
+      subject: "Test Email ?",
+      html: "<h1>SMTP working ??</h1>"
     });
 
-    console.log("📩 Test Response:", response);
-    res.send("Email sent ✅");
+    res.send("Email sent ?");
   } catch (err) {
-    console.error("❌ Test Error:", err);
-    res.send("Error ❌");
+    console.error("? Test Error:", err);
+    res.status(500).send(err.message);
   }
 });
 
-// 🔐 OTP Config
+// ?? OTP Config
 const EMAIL_REGEX = /^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+$/;
 const OTP_TTL_MS = 5 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
@@ -94,31 +131,27 @@ const hashCode = (code) =>
 const generateOtp = () =>
   String(100000 + Math.floor(Math.random() * 900000));
 
-// 📩 Send Email
+// ?? Send OTP
 async function sendOtpEmail(email, code) {
-  console.log("📨 Sending OTP to:", email);
+  console.log("?? Sending OTP to:", email);
 
-  const result = await resend.emails.send({
-    from: `${RESEND_FROM_NAME} <${RESEND_FROM_EMAIL}>`,
-    to: [email],
+  await sendMail({
+    to: email,
     subject: "Your Quiz Game OTP",
     html: `<h2>Your OTP is: ${code}</h2><p>Valid for 5 minutes</p>`
   });
-
-  console.log("📩 Resend response:", result);
-
-  if (result.error) {
-    throw new Error(result.error.message || "Email send failed");
-  }
 }
 
-// ✅ SEND OTP
+// ? SEND OTP
 app.post("/otp/send", async (req, res) => {
   try {
     const email = (req.body?.email || "").trim().toLowerCase();
 
     if (!EMAIL_REGEX.test(email)) {
-      return res.status(400).json({ success: false, message: "Valid email required" });
+      return res.status(400).json({
+        success: false,
+        message: "Valid email required"
+      });
     }
 
     const code = generateOtp();
@@ -132,41 +165,56 @@ app.post("/otp/send", async (req, res) => {
 
     await sendOtpEmail(email, code);
 
-    res.json({ success: true, message: "OTP sent ✅" });
+    res.json({ success: true, message: "OTP sent ?" });
 
   } catch (err) {
-    console.error("❌ OTP send error:", err);
-    res.status(500).json({ success: false, message: err.message });
+    console.error("? OTP send error:", err);
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
   }
 });
 
-// ✅ VERIFY OTP
+// ? VERIFY OTP
 app.post("/otp/verify", async (req, res) => {
   try {
     const email = (req.body?.email || "").trim().toLowerCase();
     const code = (req.body?.code || "").trim();
 
     if (!EMAIL_REGEX.test(email) || !/^\d{6}$/.test(code)) {
-      return res.status(400).json({ success: false, message: "Invalid email or OTP" });
+      return res.status(400).json({
+        success: false,
+        message: "Invalid email or OTP"
+      });
     }
 
     const docRef = db.collection("otp_requests").doc(email);
     const snap = await docRef.get();
 
     if (!snap.exists) {
-      return res.status(400).json({ success: false, message: "No OTP found" });
+      return res.status(400).json({
+        success: false,
+        message: "No OTP found"
+      });
     }
 
     const data = snap.data();
 
     if (data.expiresAt.toMillis() < Date.now()) {
       await docRef.delete();
-      return res.status(400).json({ success: false, message: "OTP expired" });
+      return res.status(400).json({
+        success: false,
+        message: "OTP expired"
+      });
     }
 
     if (data.attempts >= MAX_ATTEMPTS) {
       await docRef.delete();
-      return res.status(400).json({ success: false, message: "Too many attempts" });
+      return res.status(400).json({
+        success: false,
+        message: "Too many attempts"
+      });
     }
 
     const isValid = data.codeHash === hashCode(code);
@@ -174,25 +222,31 @@ app.post("/otp/verify", async (req, res) => {
     await docRef.update({ attempts: data.attempts + 1 });
 
     if (!isValid) {
-      return res.status(400).json({ success: false, message: "Invalid OTP" });
+      return res.status(400).json({
+        success: false,
+        message: "Invalid OTP"
+      });
     }
 
     await docRef.delete();
 
-    res.json({ success: true, message: "OTP verified ✅" });
+    res.json({ success: true, message: "OTP verified ?" });
 
   } catch (err) {
-    console.error("❌ OTP verify error:", err);
-    res.status(500).json({ success: false, message: "Verification failed" });
+    console.error("? OTP verify error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Verification failed"
+    });
   }
 });
 
-// ❤️ Health check
-app.get("/health", (req, res) => {
+// ?? Health check
+app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-// 🚀 Start server
+// ?? Start server
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`?? Server running on port ${PORT}`);
 });
