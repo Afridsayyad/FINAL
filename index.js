@@ -3,32 +3,23 @@ import dotenv from "dotenv";
 import { Resend } from "resend";
 import admin from "firebase-admin";
 import crypto from "crypto";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
-
 dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 4000;
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "";
 const RESEND_FROM_NAME = process.env.RESEND_FROM_NAME || "Quiz Game";
 
-let serviceAccount = null;
-if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-  serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-} else {
-  const keyPath = path.join(__dirname, "serviceAccountKey.json");
-  if (fs.existsSync(keyPath)) {
-    serviceAccount = JSON.parse(fs.readFileSync(keyPath, "utf-8"));
-  }
+const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+if (!serviceAccountJson) {
+  console.error("Firebase service account missing. Provide FIREBASE_SERVICE_ACCOUNT_JSON.");
+  process.exit(1);
 }
-
-if (!serviceAccount) {
-  console.error("Firebase service account missing. Provide FIREBASE_SERVICE_ACCOUNT_JSON or serviceAccountKey.json");
+let serviceAccount;
+try {
+  serviceAccount = JSON.parse(serviceAccountJson);
+} catch (err) {
+  console.error("FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON.");
   process.exit(1);
 }
 
